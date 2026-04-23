@@ -167,7 +167,7 @@ class InterviewApp:
 
         analysis = f"🗣 Speech Rate: {wpm} WPM\n⏸ Pauses detected: {pause_count}"
         comment = ""
-        if wpm < 90:
+        if wpm < 70:
             comment += "Your speech was slow. Be more fluid.\n"
         elif wpm > 160:
             comment += "You spoke fast. Slow down for clarity.\n"
