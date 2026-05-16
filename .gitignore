@@ -1,1 +1,18 @@
+# model folder (too large for github)
+interview_sentiment_model/
+
+# virtual environment
+venv/
+
+# generated files
 responses/
+graph.png
+Interview_Report.pdf
+
+# python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# audio files
+*.wav

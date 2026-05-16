@@ -7,7 +7,7 @@ from scipy.io.wavfile import write
 import numpy as np
 import pyttsx3
 import speech_recognition as sr
-from transformers import pipeline
+from sentiment import SentimentAnalyser
 from fuzzywuzzy import fuzz
 from fpdf import FPDF
 import matplotlib.pyplot as plt
@@ -72,7 +72,7 @@ class InterviewApp:
         self.current_q = 0
         self.responses = []
 
-        self.sentiment_model = pipeline("sentiment-analysis")
+        self.sentiment_model = SentimentAnalyser()
         self.recognizer = sr.Recognizer()
         self.tts = pyttsx3.init()
         try:
@@ -211,9 +211,9 @@ class InterviewApp:
             messagebox.showwarning("Empty Answer", "Please provide a valid answer.")
             return
 
-        result = self.sentiment_model(cleaned_answer)[0]
-        sentiment_label = result.get("label", "UNKNOWN")
-        sentiment_raw_score = float(result.get("score", 0.0))
+        result = self.sentiment_model.predict(cleaned_answer)
+        sentiment_label = result["label"].upper()
+        sentiment_raw_score = result["confidence"]
 
         expected_keywords = self.keywords_dict.get(question, [])
         answer_lower = cleaned_answer.lower()
