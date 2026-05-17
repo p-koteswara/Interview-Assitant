@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox, simpledialog
+from sentence_transformers import SentenceTransformer, util
 import threading
 import os
 import sounddevice as sd
@@ -24,6 +25,15 @@ class InterviewApp:
         self.root.geometry("700x700")
         self.root.title("AI Job Interview Assistant")
         self.root.config(bg="#f0f4f8")
+        
+        self.semantic_model = None
+        self.sentiment_model = None
+        self.grammar_tool = None
+        self.recognizer = sr.Recognizer()
+        self.tts = pyttsx3.init()
+        self.models_loaded = False
+        self.keyword_embeddings = {}
+
         self.show_welcome_screen()
 
     def show_welcome_screen(self):
@@ -39,47 +49,76 @@ class InterviewApp:
         )
         welcome_label.pack(pady=80)
 
-        proceed_btn = tk.Button(self.root, text="➡ Proceed to Interview", command=self.setup_main_ui, bg="#4CAF50", fg="white", font=("Arial", 14, "bold"), width=25, height=2)
-        proceed_btn.pack()
+        self.proceed_btn = tk.Button(
+            self.root, 
+            text="➡ Proceed to Interview", 
+            command=self.start_loading, 
+            bg="#4CAF50", 
+            fg="white", 
+            font=("Arial", 14, "bold"), 
+            width=25, 
+            height=2
+        )
+        self.proceed_btn.pack()
+
+    def start_loading(self):
+        # Disable button and show loading status
+        self.proceed_btn.config(text="⏳ Loading AI Models...", state="disabled", bg="#9e9e9e")
+        threading.Thread(target=self.load_models, daemon=True).start()
+
+    def load_models(self):
+        try:
+            # Initialize questions and keywords for pre-encoding
+            self.questions = [
+                "Tell me about yourself.",
+                "Why do you want this job?",
+                "What are your strengths and weaknesses?",
+                "Describe a challenge you've overcome.",
+                "Where do you see yourself in five years?",
+                "Why should we hire you?",
+                "Tell me about a time you worked in a team.",
+                "What is your greatest achievement?",
+                "How do you handle stress or pressure?",
+                "Do you have any questions for us?"
+            ]
+
+            self.keywords_dict = {
+                "Tell me about yourself.": ["background", "experience", "education", "skills"],
+                "Why do you want this job?": ["company", "values", "mission", "position"],
+                "What are your strengths and weaknesses?": ["strength", "weakness", "improve", "growth"],
+                "Describe a challenge you've overcome.": ["problem", "solution", "difficult", "overcome"],
+                "Where do you see yourself in five years?": ["future", "goal", "career", "progression"],
+                "Why should we hire you?": ["fit", "qualifications", "value", "unique"],
+                "Tell me about a time you worked in a team.": ["collaboration", "teamwork", "role", "project"],
+                "What is your greatest achievement?": ["success", "goal", "achievement", "impact"],
+                "How do you handle stress or pressure?": ["stress", "cope", "pressure", "calm"],
+                "Do you have any questions for us?": ["culture", "growth", "expectations", "team"]
+            }
+
+            # Load models
+            self.semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
+            self.sentiment_model = SentimentAnalyser()
+            
+            # Pre-encode keywords for performance
+            for q, kws in self.keywords_dict.items():
+                self.keyword_embeddings[q] = [
+                    self.semantic_model.encode(kw, convert_to_tensor=True) for kw in kws
+                ]
+
+            try:
+                self.grammar_tool = language_tool_python.LanguageTool("en-US")
+            except Exception:
+                self.grammar_tool = None
+            
+            self.models_loaded = True
+            self.root.after(0, self.setup_main_ui)
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to load models: {e}"))
+            self.root.after(0, lambda: self.proceed_btn.config(text="➡ Retry Proceed", state="normal", bg="#4CAF50"))
 
     def setup_main_ui(self):
-        self.questions = [
-            "Tell me about yourself.",
-            "Why do you want this job?",
-            "What are your strengths and weaknesses?",
-            "Describe a challenge you've overcome.",
-            "Where do you see yourself in five years?",
-            "Why should we hire you?",
-            "Tell me about a time you worked in a team.",
-            "What is your greatest achievement?",
-            "How do you handle stress or pressure?",
-            "Do you have any questions for us?"
-        ]
-
-        self.keywords_dict = {
-            "Tell me about yourself.": ["background", "experience", "education", "skills"],
-            "Why do you want this job?": ["company", "values", "mission", "position"],
-            "What are your strengths and weaknesses?": ["strength", "weakness", "improve", "growth"],
-            "Describe a challenge you've overcome.": ["problem", "solution", "difficult", "overcome"],
-            "Where do you see yourself in five years?": ["future", "goal", "career", "progression"],
-            "Why should we hire you?": ["fit", "qualifications", "value", "unique"],
-            "Tell me about a time you worked in a team.": ["collaboration", "teamwork", "role", "project"],
-            "What is your greatest achievement?": ["success", "goal", "achievement", "impact"],
-            "How do you handle stress or pressure?": ["stress", "cope", "pressure", "calm"],
-            "Do you have any questions for us?": ["culture", "growth", "expectations", "team"]
-        }
-
         self.current_q = 0
         self.responses = []
-
-        self.sentiment_model = SentimentAnalyser()
-        self.recognizer = sr.Recognizer()
-        self.tts = pyttsx3.init()
-        try:
-            self.grammar_tool = language_tool_python.LanguageTool("en-US")
-        except Exception:
-            # Continue without grammar checking if LanguageTool is unavailable.
-            self.grammar_tool = None
 
         for widget in self.root.winfo_children():
             widget.destroy()
@@ -148,7 +187,6 @@ class InterviewApp:
         feedback = self.analyze_speech_rate_and_pauses(filename, transcript)
         self.root.after(0, lambda: self.edit_transcript_and_analyze(transcript, feedback))
 
-
     def edit_transcript_and_analyze(self, transcript, feedback):
         messagebox.showinfo("🗣 Speech Analysis", feedback)
         corrected = simpledialog.askstring("Edit Transcript", "Edit your response if needed:", initialvalue=transcript)
@@ -211,13 +249,20 @@ class InterviewApp:
             messagebox.showwarning("Empty Answer", "Please provide a valid answer.")
             return
 
+        # Sentiment Analysis
         result = self.sentiment_model.predict(cleaned_answer)
         sentiment_label = result["label"].upper()
         sentiment_raw_score = result["confidence"]
 
-        expected_keywords = self.keywords_dict.get(question, [])
-        answer_lower = cleaned_answer.lower()
-        keyword_hits = sum(1 for kw in expected_keywords if kw.lower() in answer_lower)
+        # Keyword Matching with Cosine Similarity
+        answer_embedding = self.semantic_model.encode(cleaned_answer, convert_to_tensor=True)
+        keyword_hits = 0
+        expected_keyword_embeddings = self.keyword_embeddings.get(question, [])
+        
+        for kw_embedding in expected_keyword_embeddings:
+            score = util.cos_sim(answer_embedding, kw_embedding).item()
+            if score > 0.4:  # Similarity threshold
+                keyword_hits += 1
 
         sentiment_score_0_5 = round(sentiment_raw_score * 5, 2)
         confidence = min(10.0, round((keyword_hits * 2) + sentiment_score_0_5, 2))
